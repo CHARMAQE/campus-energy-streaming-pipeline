@@ -29,4 +29,5 @@ coverage.xml
 
 # Logs
 logs/
-*.log
+*.logivy_cache/
+ivy_cache/

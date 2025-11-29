@@ -32,11 +32,14 @@ services:
     container_name: spark-master
     depends_on:
       - kafka
+    environment:
+      - SPARK_JARS_PACKAGES=org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1
     ports:
       - "8080:8080"   # Spark master UI
       - "7077:7077"   # Spark master RPC
     volumes:
       - ./spark:/opt/spark/work-dir
+      - ./ivy_cache:/home/spark/.ivy2
     command: ["/bin/bash", "-lc", "/opt/spark/sbin/start-master.sh -h spark-master; tail -f /opt/spark/logs/*master*.out"]
 
   spark-worker:
@@ -44,8 +47,11 @@ services:
     container_name: spark-worker
     depends_on:
       - spark-master
+    environment:
+      - SPARK_JARS_PACKAGES=org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1
     ports:
       - "8081:8081"   # Spark worker UI
     volumes:
       - ./spark:/opt/spark/work-dir
+      - ./ivy_cache:/home/spark/.ivy2
     command: ["/bin/bash", "-lc", "/opt/spark/sbin/start-worker.sh spark://spark-master:7077; tail -f /opt/spark/logs/*worker*.out"]

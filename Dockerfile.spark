@@ -1,0 +1,17 @@
+FROM apache/spark:3.5.1
+
+USER root
+
+# Install Python dependencies
+RUN apt-get update && apt-get install -y python3-pip && \
+    pip install --upgrade pip && \
+    pip install numpy pandas scikit-learn kafka-python
+
+# Create log directory and set permissions
+RUN mkdir -p /opt/spark/logs && \
+    chown -R spark:spark /opt/spark/logs && \
+    chown -R spark:spark /opt/spark/work-dir && \
+    chmod -R 755 /opt/spark/logs
+
+# Switch back to spark user
+USER spark

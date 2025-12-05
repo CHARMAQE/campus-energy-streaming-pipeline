@@ -284,8 +284,7 @@ docker-compose down -v
 ## 🎓 Author
 
 **CHARMAQE Hamza**  
-Big Data & Machine Learning Project  
-Master's Program - 2025
+Big Data & Machine Learning Project
 ---
 
 ## 🤝 Acknowledgments

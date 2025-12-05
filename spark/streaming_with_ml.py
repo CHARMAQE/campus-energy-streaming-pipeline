@@ -71,7 +71,7 @@ df_raw = (
     .format("kafka")
     .option("kafka.bootstrap.servers", "kafka:9092")
     .option("subscribe", "university_consumption")
-    .option("startingOffsets", "earliest")  # Changed to read all available data
+    .option("startingOffsets", "latest")  # Changed from "earliest" to "latest"
     .option("failOnDataLoss", "false")      # Don't fail on data loss
     .option("maxOffsetsPerTrigger", "1000") # Limit records per batch
     .load()

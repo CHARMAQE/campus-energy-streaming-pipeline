@@ -5,7 +5,7 @@ import argparse
 import logging
 import signal
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from kafka import KafkaProducer
 from kafka.errors import KafkaError, NoBrokersAvailable
 
@@ -91,7 +91,7 @@ def generate_data(building: str, floor: int):
         "electricity": electricity,
         "water": water,
         "status": status,
-        "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat(),  # ✅ USE CURRENT TIME
     }
 
 _running = True

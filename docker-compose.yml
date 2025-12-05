@@ -27,6 +27,45 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
 
+  mongodb:
+    image: mongo:7.0
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin123
+      MONGO_INITDB_DATABASE: energy_monitoring
+    volumes:
+      - mongodb_data:/data/db
+
+  # NEW: PostgreSQL for Grafana (Free & Built-in Support!)
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: energy_monitoring
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin123
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: grafana
+    depends_on:
+      - postgres
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin123
+    volumes:
+      - grafana_data:/var/lib/grafana
+
   spark-master:
     build:
       context: .
@@ -34,8 +73,10 @@ services:
     container_name: spark-master
     depends_on:
       - kafka
+      - mongodb
+      - postgres
     environment:
-      - SPARK_JARS_PACKAGES=org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1
+      - SPARK_JARS_PACKAGES=org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.mongodb.spark:mongo-spark-connector_2.12:10.3.0,org.postgresql:postgresql:42.7.1
     ports:
       - "8080:8080"
       - "7077:7077"
@@ -54,7 +95,7 @@ services:
     depends_on:
       - spark-master
     environment:
-      - SPARK_JARS_PACKAGES=org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1
+      - SPARK_JARS_PACKAGES=org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.mongodb.spark:mongo-spark-connector_2.12:10.3.0,org.postgresql:postgresql:42.7.1
     ports:
       - "8081:8081"
     volumes:
@@ -64,3 +105,8 @@ services:
       bash -c "sleep 5 &&
       /opt/spark/sbin/start-worker.sh spark://spark-master:7077 &&
       tail -f /dev/null"
+
+volumes:
+  mongodb_data:
+  postgres_data:
+  grafana_data:

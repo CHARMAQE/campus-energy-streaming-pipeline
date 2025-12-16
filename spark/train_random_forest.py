@@ -1,4 +1,3 @@
-# spark/train_random_forest.py
 """
 Train Random Forest model for anomaly detection.
 """

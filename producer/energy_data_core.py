@@ -1,4 +1,3 @@
-# producer/energy_data_core.py
 """
 Core energy data generation logic.
 Used by both training and real-time producers.

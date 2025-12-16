@@ -1,16 +1,6 @@
-# spark/streaming_with_rf.py
 """
 Real-time anomaly detection on Kafka stream.
-Applies trained Random Forest model.
-
-DESIGN DECISION: Uses processing-time semantics (not event-time)
-- Prioritizes real-time alerts over historical accuracy
-- Suitable for IoT monitoring where immediate detection matters
-- Sensor data arrives in order from Kafka (late arrivals rare)
-- Simpler architecture without watermark complexity
-
-For systems requiring historical accuracy (e.g., billing, auditing),
-event-time with watermarks would be more appropriate.
+Optimized for low-memory environments (8GB RAM).
 """
 
 from pyspark.sql import SparkSession
@@ -31,11 +21,16 @@ print("=" * 60)
 print(f"Model accuracy: {metadata['accuracy']*100:.1f}%")
 print("=" * 60)
 
-# Create Spark session
+# Create Spark session with minimum required memory
 spark = SparkSession.builder \
     .appName("RealTimeAnomalyDetection") \
-    .config("spark.executor.memory", "1g") \
+    .config("spark.executor.memory", "512m") \
+    .config("spark.driver.memory", "512m") \
     .config("spark.sql.adaptive.enabled", "false") \
+    .config("spark.sql.shuffle.partitions", "4") \
+    .config("spark.default.parallelism", "4") \
+    .config("spark.sql.streaming.minBatchesToRetain", "2") \
+    .config("spark.cleaner.referenceTracking.cleanCheckpoints", "true") \
     .getOrCreate()
 
 spark.sparkContext.setLogLevel("WARN")
@@ -45,7 +40,7 @@ print("\nLoading trained model...")
 model = PipelineModel.load(MODEL_DIR)
 print("✅ Model loaded")
 
-# Schema (NO STATUS - real production)
+# Schema
 schema = StructType([
     StructField("building", StringType(), True),
     StructField("floor", IntegerType(), True),
@@ -54,7 +49,7 @@ schema = StructType([
     StructField("timestamp", StringType(), True)
 ])
 
-# Connect to Kafka - Use kafka:29092 (Docker network)
+# Connect to Kafka
 print("\nConnecting to Kafka...")
 df_raw = spark.readStream \
     .format("kafka") \
@@ -62,9 +57,10 @@ df_raw = spark.readStream \
     .option("subscribe", "university_consumption") \
     .option("startingOffsets", "latest") \
     .option("failOnDataLoss", "false") \
+    .option("maxOffsetsPerTrigger", "100") \
     .load()
 
-# Parse JSON and use current timestamp
+# Parse JSON
 df = df_raw.selectExpr("CAST(value AS STRING) as json") \
     .select(from_json(col("json"), schema).alias("data")) \
     .select("data.*") \
@@ -82,7 +78,7 @@ predictions = predictions \
     .withColumn("is_anomaly", (col("prediction") == 1.0)) \
     .withColumn("anomaly_probability", get_prob(col("probability")))
 
-# Aggregations
+# Aggregations with coalesce to reduce partitions
 agg_building = predictions.groupBy(
     window(col("timestamp"), "30 seconds"),
     col("building")
@@ -99,11 +95,12 @@ agg_building = predictions.groupBy(
     col("avg_anomaly_prob"),
     col("window.start").alias("window_start"),
     col("window.end").alias("window_end")
-)
+).coalesce(1)
 
 # Filter anomalies
 anomalies = predictions.filter(col("is_anomaly") == True) \
-    .select("building", "floor", "electricity", "water", "anomaly_probability", "timestamp")
+    .select("building", "floor", "electricity", "water", "anomaly_probability", "timestamp") \
+    .coalesce(1)
 
 # PostgreSQL config
 postgres_url = "jdbc:postgresql://postgres:5432/energy_monitoring"
@@ -137,19 +134,18 @@ print("\nStarting streaming queries...")
 print("✅ Streaming queries started")
 print("Press Ctrl+C to stop\n")
 
-# Update mode for aggregations
+# Longer trigger interval to reduce overhead
 q1 = agg_building.writeStream \
     .foreachBatch(write_aggregations) \
     .outputMode("update") \
-    .trigger(processingTime='30 seconds') \
+    .trigger(processingTime='1 minute') \
     .option("checkpointLocation", "/opt/spark/work-dir/checkpoints/agg") \
     .start()
 
-# Append mode for anomalies
 q2 = anomalies.writeStream \
     .foreachBatch(write_anomalies) \
     .outputMode("append") \
-    .trigger(processingTime='30 seconds') \
+    .trigger(processingTime='1 minute') \
     .option("checkpointLocation", "/opt/spark/work-dir/checkpoints/anomalies") \
     .start()
 

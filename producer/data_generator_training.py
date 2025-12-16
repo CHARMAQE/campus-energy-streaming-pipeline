@@ -1,56 +1,156 @@
-# producer/data_generator_training.py
+"""
+Generate labeled training data for ML model.
+Creates historical dataset with known anomalies.
+"""
+
 import csv
 import random
-import datetime
 import argparse
+from datetime import datetime, timedelta, timezone
 from tqdm import trange
+from energy_data_core import (
+    generate_reading,
+    BUILDINGS,
+    FLOORS_PER_BUILDING
+)
 
-def build_row(building, floor, is_anomaly=False, hour=None):
-    # hour influences profile: daytime heavier
-    if hour is None:
-        hour = random.randint(0, 23)
-    daylight = 1.2 if 7 <= hour <= 19 else 0.8
-    peak = 1.3 if 12 <= hour <= 14 else 1.0
-    profile = daylight * peak
-
-    building_factor = 1.0 + 0.05 * (hash(building) % 5)
-    floor_factor = 1.0 + (floor - 1) * 0.02
-
-    base_elec = 95 * profile * building_factor * floor_factor
-    base_water = 180 * profile * building_factor * floor_factor
-
-    if is_anomaly:
-        electricity = round(random.uniform(base_elec + 120, base_elec + 350), 2)
-        water = round(random.uniform(base_water + 150, base_water + 600), 2)
-        status = "anomaly"
-    else:
-        electricity = round(random.uniform(base_elec * 0.6, base_elec + 85), 2)
-        water = round(random.uniform(base_water * 0.6, base_water + 170), 2)
-        status = "normal"
-
-    ts = (datetime.datetime.utcnow() - datetime.timedelta(seconds=random.randint(0, 86400))).isoformat() + "Z"
-    return [building, floor, electricity, water, status, ts]
+def generate_training_dataset(
+    num_records: int = 200000,
+    anomaly_rate: float = 0.05,
+    days_back: int = 30,
+    output_file: str = "../spark/training_energy.csv"
+):
+    """
+    Generate training dataset with labeled anomalies.
+    
+    Args:
+        num_records: Total number of records to generate
+        anomaly_rate: Fraction of records that should be anomalies (0.05 = 5%)
+        days_back: Generate data from this many days in the past
+        output_file: Output CSV filename
+    
+    Why these defaults?
+        - 200k records: Enough for good ML training (not too small, not too big)
+        - 5% anomaly rate: Realistic for university buildings (1-2 events per day)
+        - 30 days back: One month of historical data
+    """
+    print("=" * 60)
+    print("GENERATING LABELED TRAINING DATA")
+    print("=" * 60)
+    print(f"Records: {num_records:,}")
+    print(f"Anomaly rate: {anomaly_rate*100:.1f}%")
+    print(f"Time range: {days_back} days ago to now")
+    print(f"Buildings: {len(BUILDINGS)} ({', '.join(BUILDINGS)})")
+    print(f"Floors per building: {FLOORS_PER_BUILDING}")
+    
+    # Calculate expected anomalies
+    expected_anomalies = int(num_records * anomaly_rate)
+    print(f"Expected anomalies: ~{expected_anomalies:,}")
+    print("=" * 60)
+    
+    records = []
+    actual_anomalies = 0
+    
+    # Generate records with progress bar
+    now = datetime.now(timezone.utc)
+    start_time = now - timedelta(days=days_back)
+    
+    for i in trange(num_records, desc="Generating"):
+        # Random building and floor
+        building = random.choice(BUILDINGS)
+        floor = random.randint(1, FLOORS_PER_BUILDING)
+        
+        # Random timestamp in the past (uniform distribution)
+        seconds_offset = random.randint(0, days_back * 86400)
+        timestamp = start_time + timedelta(seconds=seconds_offset)
+        
+        # Force some anomalies to meet target rate
+        remaining_records = num_records - i
+        remaining_anomalies = expected_anomalies - actual_anomalies
+        force_anomaly = False
+        
+        if remaining_records > 0:
+            # Probability to force anomaly to reach target rate
+            force_probability = max(0, remaining_anomalies / remaining_records)
+            force_anomaly = random.random() < force_probability
+        
+        # Generate reading using unified core logic
+        reading = generate_reading(building, floor, timestamp, force_anomaly)
+        
+        if reading["status"] == "anomaly":
+            actual_anomalies += 1
+        
+        records.append(reading)
+    
+    # Write to CSV
+    print(f"\n💾 Writing to {output_file}...")
+    with open(output_file, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            "building", "floor", "electricity", "water", "status", "timestamp"
+        ])
+        writer.writeheader()
+        writer.writerows(records)
+    
+    # Statistics
+    normal_count = num_records - actual_anomalies
+    actual_rate = actual_anomalies / num_records * 100
+    
+    print("\n" + "=" * 60)
+    print("✅ TRAINING DATA GENERATED SUCCESSFULLY!")
+    print("=" * 60)
+    print(f"Total records: {num_records:,}")
+    print(f"Normal: {normal_count:,} ({normal_count/num_records*100:.1f}%)")
+    print(f"Anomalies: {actual_anomalies:,} ({actual_rate:.1f}%)")
+    print(f"File: {output_file}")
+    print(f"Size: {len(records) * 80 / 1024 / 1024:.1f} MB (approx)")
+    print("=" * 60)
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--out", default="training_energy.csv")
-    parser.add_argument("--rows", type=int, default=200000)
-    parser.add_argument("--buildings", nargs="*", default=["Building A", "Building B", "Building C", "Building D"])
-    parser.add_argument("--floors", type=int, default=5)
-    parser.add_argument("--anomaly_rate", type=float, default=0.05)
+    parser = argparse.ArgumentParser(
+        description="Generate labeled training data for energy anomaly detection"
+    )
+    parser.add_argument(
+        "--output",
+        default="../spark/training_energy.csv",
+        help="Output CSV file path"
+    )
+    parser.add_argument(
+        "--records",
+        type=int,
+        default=200000,
+        help="Number of records to generate"
+    )
+    parser.add_argument(
+        "--anomaly-rate",
+        type=float,
+        default=0.05,
+        help="Fraction of anomalous records (0.0-1.0)"
+    )
+    parser.add_argument(
+        "--days-back",
+        type=int,
+        default=30,
+        help="Generate data from this many days in the past"
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Random seed for reproducibility"
+    )
+    
     args = parser.parse_args()
-
-    with open(args.out, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["building", "floor", "electricity", "water", "status", "timestamp"])
-        for _ in trange(args.rows):
-            b = random.choice(args.buildings)
-            fl = random.randint(1, args.floors)
-            is_an = random.random() < args.anomaly_rate
-            row = build_row(b, fl, is_an)
-            writer.writerow(row)
-
-    print(f"Saved {args.out}")
+    
+    if args.seed is not None:
+        random.seed(args.seed)
+        print(f"🎲 Using random seed: {args.seed}")
+    
+    generate_training_dataset(
+        num_records=args.records,
+        anomaly_rate=args.anomaly_rate,
+        days_back=args.days_back,
+        output_file=args.output
+    )
 
 if __name__ == "__main__":
     main()

@@ -1,33 +1,43 @@
+# Create .gitignore if it doesn't exist
+cat > .gitignore << 'EOF'
 # Python
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
 *.so
 *.egg-info/
-.build/
-dist/
-build/
+.Python
 
-# Envs
-.env
-.env.*
-.venv/
-venv/
+# Spark
+spark/checkpoints/*
+spark/models/random_forest_energy/*
+!spark/models/.gitkeep
+*.parquet
+*.log
 
-# Tools / caches
-.pytest_cache/
-.mypy_cache/
-.coverage
-coverage.xml
-.ipynb_checkpoints/
-
-# Editors & OS
+# IDE
 .vscode/
 .idea/
-.DS_Store
+*.swp
+*.swo
 
-# Logs
-logs/
-*.logivy_cache/
+# Docker volumes
+mongodb_data/
+postgres_data/
+grafana_data/
 ivy_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+*.env
+
+# Large files
+*.csv
+!spark/training_energy.csv
+EOF
+
+# Add .gitignore
+git add .gitignore

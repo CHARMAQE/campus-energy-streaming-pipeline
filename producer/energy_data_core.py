@@ -1,6 +1,7 @@
 """
 Core energy data generation logic.
 ✅ SIMPLIFIED: Rare anomalies, no complex statistics
+✅ ENHANCED: Includes anomaly type for visualization
 """
 
 import random
@@ -8,7 +9,7 @@ from datetime import datetime, time
 
 # Building configuration
 BUILDINGS = ["Building A", "Building B", "Building C"]
-FLOORS_PER_BUILDING = 5
+FLOORS_PER_BUILDING = 3
 
 # Normal consumption ranges (kWh)
 ELEC_NORMAL_MEAN = 100.0
@@ -21,8 +22,6 @@ WORKING_HOURS_START = time(8, 0)   # 8:00 AM
 WORKING_HOURS_END = time(18, 0)    # 6:00 PM
 
 # ✅ SIMPLIFIED: Very low anomaly rates (1-2 per day)
-# Calculation: 15 readings/2sec = 450/min = 27,000/hour = 648,000/day
-# For 1 anomaly per day: 1/648,000 = 0.00000154
 ANOMALY_PROBABILITY_WORKING_HOURS = 0.000002   # ~1-2 anomalies per day
 ANOMALY_PROBABILITY_OFF_HOURS = 0.0000001      # Almost never at night
 
@@ -57,6 +56,7 @@ def generate_reading(building, floor, timestamp, force_anomaly=False, include_la
     """
     Generate energy reading.
     ✅ SIMPLIFIED: Clear anomaly patterns, always positive values
+    ✅ ENHANCED: Returns anomaly_type for database storage
     """
     # Normal values
     electricity = random.gauss(ELEC_NORMAL_MEAN, ELEC_NORMAL_STD)
@@ -64,6 +64,7 @@ def generate_reading(building, floor, timestamp, force_anomaly=False, include_la
     
     is_anomaly = should_generate_anomaly(timestamp, force_anomaly)
     status = "normal"
+    anomaly_type = None  # ✅ NEW: Track anomaly type
     
     if is_anomaly:
         anomaly_type = random.choices(
@@ -103,5 +104,6 @@ def generate_reading(building, floor, timestamp, force_anomaly=False, include_la
     
     if include_label:
         reading["status"] = status
+        reading["anomaly_type"] = anomaly_type  # ✅ NEW: Include in training data
     
     return reading

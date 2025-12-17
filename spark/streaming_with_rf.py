@@ -1,12 +1,13 @@
 """
 Real-time anomaly detection using ONLY Machine Learning.
 ✅ SIMPLIFIED: No complex statistics, clear messages
-✅ FIXED: Column names match database schema
+✅ ENHANCED: Includes anomaly type classification
+✅ FIXED: Realistic anomaly type thresholds
 """
 
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
-    from_json, col, window, avg, max as spark_max, min as spark_min, udf, current_timestamp
+    from_json, col, window, avg, max as spark_max, min as spark_min, udf, current_timestamp, lit
 )
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType
 from pyspark.ml import PipelineModel
@@ -77,42 +78,100 @@ print("✅ Connected to Kafka\n")
 print("🤖 Applying machine learning model...")
 predictions = model.transform(df)
 
-# Extract anomaly probability (0-100%)
+# Extract anomaly probability
 get_prob = udf(lambda p: float(p[1]) if p else 0.0, DoubleType())
 
 predictions = predictions \
     .withColumn("is_anomaly", (col("prediction") == 1.0)) \
     .withColumn("anomaly_probability", get_prob(col("probability")))
 
-# ✅ FIXED: Match database column names exactly
+# ✅ FIXED: Realistic anomaly type classification
+def classify_anomaly_type(electricity, water):
+    """
+    Determine anomaly type based on consumption values.
+    Normal ranges: Electricity 70-130 kWh, Water 80-160 L
+    """
+    elec_high = electricity > 200  # Very high electricity (2x normal)
+    water_high = water > 200       # Very high water (1.7x normal)
+    elec_moderate = electricity > 145  # Moderate high (1.45x normal)
+    water_moderate = water > 170       # Moderate high (1.4x normal)
+    
+    # Classification logic
+    if elec_high and water_high:
+        return "equipment_failure"  # Both very high = equipment issue
+    elif water_high:
+        return "water_leak"  # Only water very high = leak
+    elif elec_high:
+        return "power_surge"  # Only electricity very high = surge/failure
+    elif elec_moderate and water_moderate:
+        return "high_usage"  # Both moderately high = unusual usage
+    elif water_moderate:
+        return "moderate_leak"  # Water moderately high = small leak
+    elif elec_moderate:
+        return "energy_waste"  # Electricity moderately high = waste
+    else:
+        return "anomaly"  # Detected by ML but not extreme
+
+classify_type_udf = udf(classify_anomaly_type, StringType())
+
+predictions = predictions.withColumn(
+    "anomaly_type",
+    classify_type_udf(col("electricity"), col("water"))
+)
+
+# ✅ ENHANCED: Aggregations with floor-level detail
+agg_building_floor = predictions.groupBy(
+    window(col("timestamp"), "30 seconds"),
+    col("building"),
+    col("floor")  # ✅ Added floor
+).agg(
+    avg("electricity").alias("avg_electricity"),
+    avg("water").alias("avg_water"),
+    spark_max("electricity").alias("max_elec"),
+    spark_min("electricity").alias("min_elec"),
+    avg("anomaly_probability").alias("avg_anomaly_prob")
+).select(
+    col("building"),
+    col("floor"),  # ✅ Include floor
+    col("avg_electricity"),
+    col("avg_water"),
+    col("max_elec"),
+    col("min_elec"),
+    col("avg_anomaly_prob"),
+    col("window.start").alias("window_start"),
+    col("window.end").alias("window_end")
+).coalesce(1)
+
+# Building-level aggregations (for overview)
 agg_building = predictions.groupBy(
     window(col("timestamp"), "30 seconds"),
     col("building")
 ).agg(
     avg("electricity").alias("avg_electricity"),
     avg("water").alias("avg_water"),
-    spark_max("electricity").alias("max_elec"),           # ✅ Changed from max_electricity
-    spark_min("electricity").alias("min_elec"),           # ✅ Added min_elec
+    spark_max("electricity").alias("max_elec"),
+    spark_min("electricity").alias("min_elec"),
     avg("anomaly_probability").alias("avg_anomaly_prob")
 ).select(
     col("building"),
     col("avg_electricity"),
     col("avg_water"),
-    col("max_elec"),           # ✅ Matches database schema
-    col("min_elec"),           # ✅ Matches database schema
+    col("max_elec"),
+    col("min_elec"),
     col("avg_anomaly_prob"),
     col("window.start").alias("window_start"),
     col("window.end").alias("window_end")
 ).coalesce(1)
 
-# ✅ SIMPLIFIED: Just filter anomalies (ML decides, no manual rules)
+# ✅ ENHANCED: Filter anomalies with type
 anomalies = predictions.filter(col("is_anomaly") == True) \
     .select(
         "building", 
         "floor", 
         "electricity", 
         "water", 
-        "anomaly_probability", 
+        "anomaly_probability",
+        "anomaly_type",  # ✅ NEW: Include type
         "timestamp"
     ).coalesce(1)
 
@@ -124,7 +183,7 @@ postgres_props = {
     "driver": "org.postgresql.Driver"
 }
 
-# ✅ SIMPLIFIED: Clear, readable output
+# Write functions
 def write_aggregations(batch_df, batch_id):
     if not batch_df.isEmpty():
         try:
@@ -133,11 +192,17 @@ def write_aggregations(batch_df, batch_id):
         except Exception as e:
             print(f"❌ Error saving data: {e}")
 
+def write_aggregations_floor(batch_df, batch_id):
+    if not batch_df.isEmpty():
+        try:
+            batch_df.write.jdbc(postgres_url, "aggregations_floor", "append", postgres_props)
+        except Exception as e:
+            print(f"❌ Error saving floor data: {e}")
+
 def write_anomalies(batch_df, batch_id):
     if not batch_df.isEmpty():
         try:
             anomalies_list = batch_df.collect()
-            count = len(anomalies_list)
             
             print(f"\n{'='*60}")
             print(f"🚨 ANOMALY DETECTED! (Batch {batch_id})")
@@ -145,24 +210,27 @@ def write_anomalies(batch_df, batch_id):
             
             for row in anomalies_list:
                 confidence = row['anomaly_probability'] * 100
+                anomaly_type = row['anomaly_type']
                 
-                # Simple classification based on values
-                if row['electricity'] > 250:
-                    reason = "Very high electricity (equipment failure?)"
-                elif row['water'] > 250:
-                    reason = "Very high water consumption (leak?)"
-                elif row['electricity'] > 180:
-                    reason = "High electricity consumption"
-                elif row['water'] > 180:
-                    reason = "High water consumption"
-                else:
-                    reason = "Unusual consumption pattern"
+                # ✅ FIXED: Detailed type-specific messages
+                type_messages = {
+                    'equipment_failure': '🔥 Equipment failure (both consumption very high)',
+                    'water_leak': '💧 Water leak detected (high water usage)',
+                    'power_surge': '⚡ Power surge or equipment malfunction',
+                    'high_usage': '📈 Unusually high consumption',
+                    'moderate_leak': '💦 Possible small water leak',
+                    'energy_waste': '💡 Energy waste detected',
+                    'anomaly': '⚠️ Anomalous pattern detected'
+                }
+                
+                reason = type_messages.get(anomaly_type, '⚠️ Anomalous pattern')
                 
                 print(f"\n📍 Location: {row['building']}, Floor {row['floor']}")
-                print(f"⚡ Electricity: {row['electricity']:.1f} kWh")
-                print(f"💧 Water: {row['water']:.1f} L")
+                print(f"⚡ Electricity: {row['electricity']:.1f} kWh (normal: 70-130)")
+                print(f"💧 Water: {row['water']:.1f} L (normal: 80-160)")
                 print(f"🎯 ML Confidence: {confidence:.1f}%")
-                print(f"📝 Reason: {reason}")
+                print(f"🏷️  Type: {anomaly_type}")
+                print(f"📝 {reason}")
                 print(f"🕐 Time: {row['timestamp']}")
             
             print(f"{'='*60}\n")
@@ -186,7 +254,14 @@ q1 = agg_building.writeStream \
     .option("checkpointLocation", "/opt/spark/work-dir/checkpoints/agg") \
     .start()
 
-q2 = anomalies.writeStream \
+q2 = agg_building_floor.writeStream \
+    .foreachBatch(write_aggregations_floor) \
+    .outputMode("update") \
+    .trigger(processingTime='1 minute') \
+    .option("checkpointLocation", "/opt/spark/work-dir/checkpoints/agg_floor") \
+    .start()
+
+q3 = anomalies.writeStream \
     .foreachBatch(write_anomalies) \
     .outputMode("append") \
     .trigger(processingTime='1 minute') \
@@ -199,5 +274,6 @@ except KeyboardInterrupt:
     print("\n⏹️  Stopping monitoring...")
     q1.stop()
     q2.stop()
+    q3.stop()
     spark.stop()
     print("✅ Stopped successfully")

@@ -1,88 +1,106 @@
 """
 Core energy data generation logic.
-Used by both training and real-time producers.
+✅ SIMPLIFIED: Rare anomalies, no complex statistics
 """
 
 import random
-from datetime import datetime
-from typing import Dict
+from datetime import datetime, time
 
-# Configuration
+# Building configuration
 BUILDINGS = ["Building A", "Building B", "Building C"]
 FLOORS_PER_BUILDING = 5
-BASE_ELECTRICITY = 95  # kWh
-BASE_WATER = 180  # Liters
 
-# Anomaly thresholds (for training data only)
-ELECTRICITY_ANOMALY_THRESHOLD = 250
-WATER_ANOMALY_THRESHOLD = 450
+# Normal consumption ranges (kWh)
+ELEC_NORMAL_MEAN = 100.0
+ELEC_NORMAL_STD = 15.0
+WATER_NORMAL_MEAN = 120.0
+WATER_NORMAL_STD = 20.0
 
+# Working hours
+WORKING_HOURS_START = time(8, 0)   # 8:00 AM
+WORKING_HOURS_END = time(18, 0)    # 6:00 PM
 
-def time_profile(hour: int) -> float:
-    """Consumption multiplier based on hour."""
-    if 8 <= hour <= 18:  # Work hours
-        return 1.3
-    elif 19 <= hour <= 21:  # Evening
-        return 1.1
-    elif 22 <= hour <= 6:  # Night
-        return 0.7
-    return 1.0
+# ✅ SIMPLIFIED: Very low anomaly rates (1-2 per day)
+# Calculation: 15 readings/2sec = 450/min = 27,000/hour = 648,000/day
+# For 1 anomaly per day: 1/648,000 = 0.00000154
+ANOMALY_PROBABILITY_WORKING_HOURS = 0.000002   # ~1-2 anomalies per day
+ANOMALY_PROBABILITY_OFF_HOURS = 0.0000001      # Almost never at night
 
+# Simple anomaly types
+ANOMALY_TYPES = {
+    'high_consumption': 3,    # Most common: unusual high usage
+    'very_high': 1,          # Rare: equipment failure
+    'leak': 2                # Water leak
+}
 
-def building_factor(building: str) -> float:
-    """Different buildings have different efficiency."""
-    return {"Building A": 1.0, "Building B": 1.15, "Building C": 0.95}.get(building, 1.0)
+def is_working_hours(timestamp):
+    """Check if timestamp is during working hours (Mon-Fri 8am-6pm)"""
+    if timestamp.weekday() >= 5:  # Weekend
+        return False
+    current_time = timestamp.time()
+    return WORKING_HOURS_START <= current_time <= WORKING_HOURS_END
 
+def should_generate_anomaly(timestamp, force_anomaly=False):
+    """
+    Simple anomaly probability check.
+    - Training: force_anomaly=True generates balanced dataset
+    - Production: Very rare (1-2 per day during work hours)
+    """
+    if force_anomaly:
+        return True
+    
+    probability = (ANOMALY_PROBABILITY_WORKING_HOURS if is_working_hours(timestamp) 
+                   else ANOMALY_PROBABILITY_OFF_HOURS)
+    return random.random() < probability
 
-def floor_factor(floor: int) -> float:
-    """Higher floors consume slightly more."""
-    return 1.0 + (floor - 1) * 0.03
-
-
-def generate_reading(building: str, floor: int, timestamp: datetime, 
-                    force_anomaly: bool = False, include_label: bool = True) -> Dict:
+def generate_reading(building, floor, timestamp, force_anomaly=False, include_label=True):
     """
     Generate energy reading.
-    
-    Args:
-        building: Building name
-        floor: Floor number
-        timestamp: Reading timestamp
-        force_anomaly: Force anomaly (training only)
-        include_label: Include status label (training only)
+    ✅ SIMPLIFIED: Clear anomaly patterns, always positive values
     """
-    hour = timestamp.hour
+    # Normal values
+    electricity = random.gauss(ELEC_NORMAL_MEAN, ELEC_NORMAL_STD)
+    water = random.gauss(WATER_NORMAL_MEAN, WATER_NORMAL_STD)
     
-    # Calculate base consumption
-    time_mult = time_profile(hour)
-    building_mult = building_factor(building)
-    floor_mult = floor_factor(floor)
-    
-    base_elec = BASE_ELECTRICITY * time_mult * building_mult * floor_mult
-    base_water = BASE_WATER * time_mult * building_mult * floor_mult
-    
-    # Determine if anomaly
-    is_anomaly = force_anomaly or (random.random() < 0.05)
+    is_anomaly = should_generate_anomaly(timestamp, force_anomaly)
+    status = "normal"
     
     if is_anomaly:
-        electricity = round(random.uniform(ELECTRICITY_ANOMALY_THRESHOLD, 400), 2)
-        water = round(random.uniform(WATER_ANOMALY_THRESHOLD, 650), 2)
-        status = "anomaly"
-    else:
-        electricity = round(random.uniform(base_elec * 0.7, base_elec * 1.3), 2)
-        water = round(random.uniform(base_water * 0.7, base_water * 1.3), 2)
-        status = "normal"
+        anomaly_type = random.choices(
+            list(ANOMALY_TYPES.keys()),
+            weights=list(ANOMALY_TYPES.values())
+        )[0]
+        
+        if anomaly_type == 'high_consumption':
+            # 2-3x normal usage
+            electricity *= random.uniform(2.0, 3.0)
+            water *= random.uniform(1.5, 2.5)
+            status = "anomaly"
+        
+        elif anomaly_type == 'very_high':
+            # 3-5x normal usage (equipment failure)
+            electricity *= random.uniform(3.0, 5.0)
+            water *= random.uniform(2.0, 3.5)
+            status = "anomaly"
+        
+        elif anomaly_type == 'leak':
+            # Water leak: high water, normal electricity
+            water *= random.uniform(3.0, 5.0)
+            status = "anomaly"
     
-    # Build result
+    # Always positive values in production
+    if not include_label:
+        electricity = max(0.1, electricity)
+        water = max(0.1, water)
+    
     reading = {
         "building": building,
         "floor": floor,
-        "electricity": electricity,
-        "water": water,
+        "electricity": round(electricity, 2),
+        "water": round(water, 2),
         "timestamp": timestamp.isoformat()
     }
     
-    # Only include label for training data
     if include_label:
         reading["status"] = status
     

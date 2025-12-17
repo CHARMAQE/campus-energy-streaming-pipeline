@@ -16,7 +16,7 @@ from energy_data_core import (
 
 def generate_training_dataset(
     num_records: int = 200000,
-    anomaly_rate: float = 0.05,
+    anomaly_rate: float = 0.03,  # Changed from 0.05 to 0.03 (3%)
     days_back: int = 30,
     output_file: str = "../spark/training_energy.csv"
 ):
@@ -25,37 +25,28 @@ def generate_training_dataset(
     
     Args:
         num_records: Total number of records to generate
-        anomaly_rate: Fraction of records that should be anomalies (0.05 = 5%)
+        anomaly_rate: Target fraction of anomalous records (0.0-1.0)
         days_back: Generate data from this many days in the past
-        output_file: Output CSV filename
-    
-    Why these defaults?
-        - 200k records: Enough for good ML training (not too small, not too big)
-        - 5% anomaly rate: Realistic for university buildings (1-2 events per day)
-        - 30 days back: One month of historical data
+        output_file: Output CSV file path
     """
     print("=" * 60)
-    print("GENERATING LABELED TRAINING DATA")
+    print("GENERATING TRAINING DATA")
     print("=" * 60)
     print(f"Records: {num_records:,}")
-    print(f"Anomaly rate: {anomaly_rate*100:.1f}%")
-    print(f"Time range: {days_back} days ago to now")
-    print(f"Buildings: {len(BUILDINGS)} ({', '.join(BUILDINGS)})")
-    print(f"Floors per building: {FLOORS_PER_BUILDING}")
-    
-    # Calculate expected anomalies
-    expected_anomalies = int(num_records * anomaly_rate)
-    print(f"Expected anomalies: ~{expected_anomalies:,}")
+    print(f"Target anomaly rate: {anomaly_rate*100:.1f}%")
+    print(f"Time range: {days_back} days back")
+    print(f"Output: {output_file}")
     print("=" * 60)
     
     records = []
     actual_anomalies = 0
+    expected_anomalies = int(num_records * anomaly_rate)
     
-    # Generate records with progress bar
-    now = datetime.now(timezone.utc)
-    start_time = now - timedelta(days=days_back)
+    # Start time (days_back days ago)
+    start_time = datetime.now(timezone.utc) - timedelta(days=days_back)
     
-    for i in trange(num_records, desc="Generating"):
+    print("\n📊 Generating records...")
+    for i in trange(num_records):
         # Random building and floor
         building = random.choice(BUILDINGS)
         floor = random.randint(1, FLOORS_PER_BUILDING)
@@ -99,10 +90,10 @@ def generate_training_dataset(
     print("✅ TRAINING DATA GENERATED SUCCESSFULLY!")
     print("=" * 60)
     print(f"Total records: {num_records:,}")
-    print(f"Normal: {normal_count:,} ({normal_count/num_records*100:.1f}%)")
+    print(f"Normal: {normal_count:,} ({(normal_count/num_records)*100:.1f}%)")
     print(f"Anomalies: {actual_anomalies:,} ({actual_rate:.1f}%)")
-    print(f"File: {output_file}")
-    print(f"Size: {len(records) * 80 / 1024 / 1024:.1f} MB (approx)")
+    print(f"Target rate: {anomaly_rate*100:.1f}%")
+    print(f"Actual rate: {actual_rate:.1f}%")
     print("=" * 60)
 
 def main():
@@ -123,7 +114,7 @@ def main():
     parser.add_argument(
         "--anomaly-rate",
         type=float,
-        default=0.05,
+        default=0.03,  # Changed default from 0.05 to 0.03
         help="Fraction of anomalous records (0.0-1.0)"
     )
     parser.add_argument(

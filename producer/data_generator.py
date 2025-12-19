@@ -60,7 +60,7 @@ def main():
             
             # Generate readings for all buildings and floors
             for building in BUILDINGS:
-                for floor in range(1, 6):
+                for floor in range(1, 4):
                     reading = generate_reading(
                         building=building,
                         floor=floor,

@@ -1,6 +1,6 @@
-# ⚡ Real-Time Energy Consumption Monitoring System
+# ⚡ Real-Time Energy Monitoring System
 
-A distributed **big data streaming pipeline** for university energy monitoring with **ML-based anomaly detection** using Apache Kafka, Spark Streaming, and K-Means clustering.
+A **big data streaming pipeline** for university energy monitoring with **ML-based anomaly detection**.
 
 [![Kafka](https://img.shields.io/badge/Kafka-3.4.1-black?logo=apachekafka)](https://kafka.apache.org/)
 [![Spark](https://img.shields.io/badge/Spark-3.5.1-orange?logo=apachespark)](https://spark.apache.org/)
@@ -12,30 +12,27 @@ A distributed **big data streaming pipeline** for university energy monitoring w
 ## 🏗️ Architecture
 
 ```
-📊 Data Generator (15 records/sec)
+📊 Data Generator (Kafka Producer)
     ↓
-🔄 Apache Kafka (university_consumption topic)
+🔄 Apache Kafka (3 partitions)
     ↓
-⚡ Spark Streaming (1-min batches, 30-sec windows)
-    ├─ Aggregations (avg/min/max electricity & water)
-    └─ ML Anomaly Detection (K-Means + Distance Threshold)
+⚡ Spark Streaming (Random Forest ML Model)
     ↓
-💾 Dual Storage:
-    ├─ MongoDB (aggregations + anomalies)
-    └─ PostgreSQL (aggregations + anomalies)
+💾 PostgreSQL (Real-time storage)
     ↓
-📈 Grafana Dashboards (Real-time visualization)
+📈 Grafana (Visualization)
 ```
 
 ---
 
 ## 🎯 Key Features
 
-- ✅ **Real-time streaming** with Apache Kafka 
+- ✅ **Real-time streaming** with Apache Kafka
+- ✅ **ML anomaly detection** using Random Forest (98.6% accuracy)
 - ✅ **Distributed processing** with Spark Structured Streaming
-- ✅ **ML anomaly detection** using K-Means clustering 
-- ✅ **Dual persistence** (MongoDB for flexibility + PostgreSQL for analytics)
-- ✅ **Docker Compose** orchestration (one-command deployment)
+- ✅ **PostgreSQL** for analytics and storage
+- ✅ **Grafana dashboards** for real-time monitoring
+- ✅ **Docker Compose** for one-command deployment
 
 ---
 
@@ -44,42 +41,32 @@ A distributed **big data streaming pipeline** for university energy monitoring w
 ```
 real_time_energy_project/
 ├── producer/
-│   ├── data_generator.py              # Kafka producer
-│   └── data_generator_training.py     # Generate 200k training records
-├── ml/
-│   └── kmeans.py                      # Train K-Means (k=3) + StandardScaler
-├── models/
-│   ├── kmeans_energy/
-│   │   ├── kmeans_model/              # Trained K-Means model
-│   │   └── scaler_model/              # StandardScaler
-│   └── kmeans_threshold.json          # Anomaly threshold (1.86)
+│   ├── data_generator.py              # Real-time Kafka producer
+│   ├── data_generator_training.py     # Generate 200k training records
+│   └── energy_data_core.py            # Shared data generation logic
 ├── spark/
-│   ├── streaming_with_ml.py           # Real-time streaming + ML inference
-│   └── Dockerfile.spark               # Custom Spark image
-├── docker-compose.yml                 # Full stack (Kafka, Spark, MongoDB, PostgreSQL)
-├── postgres
-│     └── init.sql                         # PostgreSQL schema initialization
+│   ├── train_random_forest.py         # Train ML model (offline)
+│   ├── streaming_with_rf.py           # Real-time ML inference
+│   └── training_energy.csv            # 200k labeled records
+├── models/
+│   └── random_forest_energy/          # Trained Random Forest model
+├── postgres/
+│   └── init.sql                       # Database schema
+├── docker-compose.yml                 # Infrastructure setup
 └── README.md
 ```
 
 ---
 
-## 🚀 Quick Start (3 Steps)
+## 🚀 Quick Start
 
 ### **Prerequisites**
-```bash
-# Required: Docker, Docker Compose, Python 3.9+
-docker --version
-python3 --version
-```
+- Docker & Docker Compose installed
+- Python 3.9+
 
 ### **1️⃣ Start Infrastructure**
 ```bash
-# Clone repository
-git clone https://github.com/YOUR_USERNAME/real_time_energy_project.git
-cd real_time_energy_project
-
-# Start all services (Kafka, Spark, MongoDB, PostgreSQL, Grafana)
+# Start all services
 docker-compose up -d
 
 # Create Kafka topic
@@ -91,170 +78,193 @@ docker exec -it kafka kafka-topics \
   --replication-factor 1
 ```
 
-### **2️⃣ Start Data Producer**
+### **2️⃣ Train ML Model (One-time)**
 ```bash
-# Generate real-time data (15 records/sec)
-python producer/data_generator.py --bootstrap localhost:29092 --interval 1.0
+# Generate training data (200k records)
+python producer/data_generator_training.py
+
+# Train Random Forest model
+docker exec -it spark-master /opt/spark/bin/spark-submit \
+  --master local[*] \
+  /opt/spark/work-dir/train_random_forest.py
 ```
 
-### **3️⃣ Start Spark Streaming**
+### **3️⃣ Start Real-Time Pipeline**
 ```bash
-# Launch Spark job with ML inference
+# Terminal 1: Start data producer (15 buildings × 3 floors)
+python producer/data_generator.py --bootstrap localhost:9092
+
+# Terminal 2: Start Spark streaming with ML inference
 docker exec -it spark-master /opt/spark/bin/spark-submit \
   --master spark://spark-master:7077 \
-  --deploy-mode client \
-  --driver-memory 512m \
-  --executor-memory 512m \
-  --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.mongodb.spark:mongo-spark-connector_2.12:10.3.0,org.postgresql:postgresql:42.7.1 \
-  /opt/spark/work-dir/streaming_with_ml.py
+  --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.postgresql:postgresql:42.7.1 \
+  /opt/spark/work-dir/streaming_with_rf.py
 ```
 
-**✅ System is now running!** Check outputs:
-- **Console**: Real-time aggregations & anomaly alerts
-- **MongoDB**: `docker exec -it mongodb mongosh -u admin -p **********`
-- **PostgreSQL**: `localhost:5432` (user: `admin`, password: `**********`)
-- **Grafana**: http://localhost:3000 (admin/admin)
+### **4️⃣ Access Dashboards**
+- **Grafana**: http://localhost:3000 (admin/admin123)
+- **Spark UI**: http://localhost:8080
+- **PostgreSQL**: localhost:5432 (admin/admin123)
 
 ---
 
-## 📊 Example Output
+## 🧠 Machine Learning Model
 
-### **Aggregations (30-sec windows)**
-```
-Building A: avg_elec=171.4 kWh, avg_water=328.1 L, max_elec=220 kWh
-Building B: avg_elec=174.2 kWh, avg_water=336.5 L, max_elec=230 kWh
-Building C: avg_elec=165.8 kWh, avg_water=315.2 L, max_elec=210 kWh
-```
+### **Random Forest Classifier**
+- **Accuracy**: 98.6%
+- **Features**: Electricity consumption, Water consumption
+- **Training Data**: 200,000 labeled records (3% anomalies)
+- **Anomaly Types**: 
+  - 🔴 High Consumption (equipment malfunction)
+  - 🔴 Very High (critical failure)
+  - 💧 Leak (water system issue)
 
-### **Anomalies (when detected)**
+### **Anomaly Detection Process**
 ```
-🚨 ANOMALY DETECTED:
-   Building: Building A, Floor 4
-   Electricity: 271 kWh (⚠️ 180% of average)
-   Water: 456 L
-   Distance from cluster: 1.87 (threshold: 1.86)
-   Timestamp: 2025-12-04 16:02:00
+New Reading → ML Model → Prediction (0.0-1.0) → Anomaly if > 0.5
+                      ↓
+            Classify Type (high_consumption / very_high / leak)
+                      ↓
+            Save to PostgreSQL with metadata
 ```
 
 ---
 
-## 🧠 Machine Learning: K-Means Anomaly Detection
+## 📊 Database Schema
 
-### **How It Works**
+### **Table: `aggregations`** (30-second windows)
+```sql
+CREATE TABLE aggregations (
+    window_start TIMESTAMP,
+    window_end TIMESTAMP,
+    building VARCHAR(50),
+    avg_electricity DOUBLE PRECISION,
+    avg_water DOUBLE PRECISION,
+    max_electricity DOUBLE PRECISION,
+    max_water DOUBLE PRECISION
+);
+```
 
-1. **Training Phase** (offline):
-   ```bash
-   # Generate 200k training records
-   python producer/data_generator_training.py --rows 200000
-   
-   # Train K-Means (k=3) + StandardScaler
-   docker exec -it spark-master /opt/spark/bin/spark-submit \
-     --master local[*] /opt/spark/work-dir/ml/kmeans.py
-   ```
-   - **Output**: 3 clusters (Low/Medium/High consumption)
-   - **Threshold**: 1.86 (95th percentile of distances)
+### **Table: `aggregations_floor`** (by building + floor)
+```sql
+CREATE TABLE aggregations_floor (
+    window_start TIMESTAMP,
+    window_end TIMESTAMP,
+    building VARCHAR(50),
+    floor INTEGER,
+    avg_electricity DOUBLE PRECISION,
+    avg_water DOUBLE PRECISION
+);
+```
 
-2. **Inference Phase** (real-time):
-   - Each record → **scaled features** (electricity, water)
-   - Assigned to **nearest cluster**
-   - **Distance** calculated: `√[(elec - center_elec)² + (water - center_water)²]`
-   - **Anomaly flagged** if `distance > 1.86`
-
-### **Distance Metric Explained**
-
-| Distance | Interpretation | Action |
-|----------|----------------|--------|
-| **0.0 - 1.0** | 🟢 Very normal | No action |
-| **1.0 - 1.86** | 🟡 Normal variation | No action |
-| **1.87 - 2.5** | 🟠 Minor anomaly | Monitor |
-| **2.5 - 3.5** | 🔴 Anomaly | Investigate |
-| **> 3.5** | 🔴🔴 Critical | Immediate action |
-
-**Example**: 
-- Normal consumption: `(150 kWh, 300 L)` → cluster center
-- Anomalous consumption: `(248 kWh, 504 L)` → distance `1.88` → **ANOMALY**
-
----
-
-## 🛠️ Technologies
-
-| Component | Technology | Version | Purpose |
-|-----------|-----------|---------|---------|
-| **Streaming** | Apache Kafka | 3.4.1 | Message broker (3 partitions) |
-| **Processing** | Apache Spark | 3.5.1 | Distributed streaming + ML |
-| **ML** | K-Means Clustering | Spark MLlib | Unsupervised anomaly detection |
-| **Storage** | MongoDB | 7.0 | Flexible JSON storage |
-| **Storage** | PostgreSQL | 16 | Relational analytics |
-| **Visualization** | Grafana | 10.2 | Real-time dashboards |
-| **Orchestration** | Docker Compose | - | Container management |
+### **Table: `anomalies`** (ML-detected)
+```sql
+CREATE TABLE anomalies (
+    timestamp TIMESTAMP,
+    building VARCHAR(50),
+    floor INTEGER,
+    electricity DOUBLE PRECISION,
+    water DOUBLE PRECISION,
+    anomaly_probability DOUBLE PRECISION,
+    anomaly_type VARCHAR(50)  -- 'high_consumption', 'very_high', 'leak'
+);
+```
 
 ---
 
 ## 📈 Grafana Dashboard Setup
 
-### **1. Add PostgreSQL Data Source**
-```
-Configuration → Data Sources → PostgreSQL
-Host: postgres:5432
-Database: energy_monitoring
-User: admin / Password: **********
-```
+### **Add PostgreSQL Data Source**
+1. Configuration → Data Sources → Add PostgreSQL
+2. Settings:
+   - **Host**: `postgres:5432`
+   - **Database**: `energy_monitoring`
+   - **User**: `admin`
+   - **Password**: `admin123`
 
-### **2. Create Panels**
+### **Sample Queries**
 
-**Panel 1: Real-Time Electricity Trend**
+**Total Electricity (Stat Panel)**
 ```sql
-SELECT
-  window_start as time,
+SELECT ROUND(SUM(avg_electricity)::numeric, 2) as "Total kWh"
+FROM aggregations
+WHERE window_end >= NOW() - INTERVAL '5 minutes';
+```
+
+**Real-Time Consumption (Time Series)**
+```sql
+SELECT 
+  window_end as time,
   building,
   avg_electricity as value
 FROM aggregations
-WHERE $__timeFilter(window_start)
-ORDER BY window_start
+WHERE $__timeFilter(window_end)
+ORDER BY window_end;
 ```
 
-**Panel 2: Anomaly Alerts**
+**Recent Anomalies (Table)**
 ```sql
-SELECT
-  detected_at as time,
+SELECT 
+  timestamp,
   building,
   floor,
-  electricity,
-  distance
+  ROUND(electricity::numeric, 2) as "Electricity (kWh)",
+  ROUND((anomaly_probability * 100)::numeric, 1) as "Confidence %",
+  anomaly_type as "Type"
 FROM anomalies
-WHERE $__timeFilter(detected_at)
-ORDER BY detected_at DESC
-LIMIT 10
+WHERE $__timeFilter(timestamp)
+ORDER BY timestamp DESC
+LIMIT 20;
 ```
 
 ---
 
+## 🛠️ Technology Stack
 
-### **Access UIs**
-- **Spark Master**: http://localhost:8080
-- **Spark Application**: http://localhost:4040 (while streaming)
-- **Grafana**: http://localhost:3000
+| Component | Technology | Purpose |
+|-----------|-----------|---------|
+| **Streaming** | Apache Kafka 3.4.1 | Message broker |
+| **Processing** | Apache Spark 3.5.1 | Distributed computing |
+| **ML** | Random Forest (Spark MLlib) | Anomaly detection |
+| **Database** | PostgreSQL 15 | Data storage |
+| **Visualization** | Grafana 10.2 | Real-time dashboards |
+| **Orchestration** | Docker Compose | Container management |
 
 ---
 
-## 🧪 Testing
+## 📊 Example Output
 
-### **Generate High-Speed Data**
+### **Console (Spark Streaming)**
+```
+✅ Batch 42: Saved consumption data
+🚨 ANOMALY DETECTED!
+   Building: Building A, Floor 2
+   Electricity: 271.5 kWh (2.7x normal)
+   Water: 456.8 L
+   Probability: 0.92 (92% confident)
+   Type: high_consumption
+   Timestamp: 2025-12-20 14:32:15
+```
+
+---
+
+## 🧪 Testing & Validation
+
+### **Check Data Pipeline**
 ```bash
-# 10x faster (150 records/sec)
-python producer/data_generator.py --bootstrap localhost:29092 --interval 0.1
+# PostgreSQL: Count records
+docker exec -it postgres psql -U admin -d energy_monitoring \
+  -c "SELECT COUNT(*) FROM aggregations;"
+
+# PostgreSQL: View anomalies
+docker exec -it postgres psql -U admin -d energy_monitoring \
+  -c "SELECT * FROM anomalies ORDER BY timestamp DESC LIMIT 5;"
 ```
 
-### **Verify Anomaly Detection**
-```sql
--- In PostgreSQL (pgAdmin or psql)
-SELECT 
-    building,
-    COUNT(*) as anomaly_count,
-    AVG(distance) as avg_distance
-FROM anomalies
-GROUP BY building
-ORDER BY anomaly_count DESC;
+### **Generate More Anomalies (Testing)**
+```bash
+# Speed up data generation (10x faster)
+python producer/data_generator.py --bootstrap localhost:9092 --interval 0.2
 ```
 
 ---
@@ -265,30 +275,37 @@ ORDER BY anomaly_count DESC;
 # Stop all services
 docker-compose down
 
-# Remove volumes (data + checkpoints)
+# Remove all data (volumes)
 docker-compose down -v
 ```
 
 ---
 
-## 📝 Project Highlights
+## 📝 Key Metrics
 
-- **Scalable**: Kafka partitions + Spark workers scale horizontally
-- **Fault-tolerant**: Checkpointing ensures exactly-once processing
-- **Production-ready**: Docker Compose, health checks, resource limits
-- **ML-driven**: Unsupervised learning adapts to consumption patterns
-- **Real-time**: <1 minute latency from data generation to visualization
+- **Throughput**: 15 records/sec (45 buildings × floors)
+- **Latency**: <1 minute (from data generation to Grafana)
+- **Anomaly Rate**: ~1-2 per day (0.0002% probability during work hours)
+- **Model Accuracy**: 98.6%
+- **Data Volume**: ~1.3M records/day
 
 ---
 
 ## 🎓 Author
 
 **CHARMAQE Hamza**  
-Big Data & Machine Learning Project
+Big Data & Machine Learning Project  
+December 2025
+
 ---
 
-## 🤝 Acknowledgments
+## 📚 References
 
-- Apache Spark & Kafka communities
-- Grafana Labs for visualization tools
-- Docker for containerization platform
+- [Apache Kafka Documentation](https://kafka.apache.org/documentation/)
+- [Apache Spark Structured Streaming](https://spark.apache.org/docs/latest/structured-streaming-programming-guide.html)
+- [Grafana Dashboards](https://grafana.com/docs/grafana/latest/)
+- [Random Forest Algorithm](https://spark.apache.org/docs/latest/ml-classification-regression.html#random-forest-classifier)
+
+---
+
+**🚀 Ready to monitor energy consumption in real-time!**

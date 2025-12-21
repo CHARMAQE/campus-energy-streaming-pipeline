@@ -173,7 +173,57 @@ services:
         reservations:
           memory: 512M
 
+  airflow-webserver:
+    image: apache/airflow:2.8.1-python3.9
+    container_name: airflow-webserver
+    depends_on:
+      - postgres
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://admin:admin123@postgres/airflow
+      AIRFLOW__CORE__FERNET_KEY: 'Myh6sf-E31Bz1C9Sz_D7PFdIMu8PPGr8qcVVEdobwo4='  # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__WEBSERVER__SECRET_KEY: 'DADA12345SECRETKEY'  # Change this to a secure key
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./spark:/opt/airflow/spark  # Access to ML models
+    ports:
+      - "8082:8080"  # Airflow UI
+    command: >
+      bash -c "airflow db init &&
+      airflow users create --username admin --password admin123 --firstname Admin --lastname User --role Admin --email admin@example.com || true &&
+      airflow webserver"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  airflow-scheduler:
+    image: apache/airflow:2.8.1-python3.9
+    container_name: airflow-scheduler
+    depends_on:
+      - airflow-webserver
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://admin:admin123@postgres/airflow
+      AIRFLOW__CORE__FERNET_KEY: 'Myh6sf-E31Bz1C9Sz_D7PFdIMu8PPGr8qcVVEdobwo4='
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./spark:/opt/airflow/spark
+    command: airflow scheduler
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
 volumes:
   mongodb_data:
   postgres_data:
   grafana_data:
+  airflow_logs:

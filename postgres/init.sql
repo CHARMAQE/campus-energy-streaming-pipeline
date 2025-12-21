@@ -62,5 +62,11 @@ CREATE INDEX idx_anomalies_probability ON anomalies(anomaly_probability);
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO admin;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO admin;
 
+-- ✅ NEW: Create Airflow database for orchestration
+CREATE DATABASE airflow;
+GRANT ALL PRIVILEGES ON DATABASE airflow TO admin;
+
 -- Success message
 \echo 'Database initialization completed successfully!'
+\echo 'Created: energy_monitoring (for streaming data)'
+\echo 'Created: airflow (for workflow orchestration)'

@@ -3,6 +3,7 @@ Real-time anomaly detection using ONLY Machine Learning.
 ✅ SIMPLIFIED: No complex statistics, clear messages
 ✅ ENHANCED: Includes anomaly type classification
 ✅ FIXED: Realistic anomaly type thresholds
+✅ FIXED: Column names match database schema
 """
 
 from pyspark.sql import SparkSession
@@ -20,7 +21,7 @@ with open(f"{MODEL_DIR}/metadata.json", "r") as f:
     metadata = json.load(f)
 
 print("=" * 60)
-print("🔍 REAL-TIME ANOMALY DETECTION")
+print("🔍 REAL-TIME ANOMALY DETECTING")
 print("=" * 60)
 print(f"✅ Model Accuracy: {metadata['accuracy']*100:.1f}%")
 print(f"✅ Detection Method: Random Forest (Machine Learning)")
@@ -123,16 +124,16 @@ predictions = predictions.withColumn(
 agg_building_floor = predictions.groupBy(
     window(col("timestamp"), "30 seconds"),
     col("building"),
-    col("floor")  # ✅ Added floor
+    col("floor")
 ).agg(
     avg("electricity").alias("avg_electricity"),
     avg("water").alias("avg_water"),
-    spark_max("electricity").alias("max_elec"),
-    spark_min("electricity").alias("min_elec"),
+    spark_max("electricity").alias("max_elec"),  # Changed from max_electricity
+    spark_min("electricity").alias("min_elec"),  # Changed from min_electricity
     avg("anomaly_probability").alias("avg_anomaly_prob")
 ).select(
     col("building"),
-    col("floor"),  # ✅ Include floor
+    col("floor"),
     col("avg_electricity"),
     col("avg_water"),
     col("max_elec"),
@@ -149,8 +150,8 @@ agg_building = predictions.groupBy(
 ).agg(
     avg("electricity").alias("avg_electricity"),
     avg("water").alias("avg_water"),
-    spark_max("electricity").alias("max_elec"),
-    spark_min("electricity").alias("min_elec"),
+    spark_max("electricity").alias("max_elec"),  # Changed from max_electricity
+    spark_min("electricity").alias("min_elec"),  # Changed from min_electricity
     avg("anomaly_probability").alias("avg_anomaly_prob")
 ).select(
     col("building"),
